@@ -19,7 +19,7 @@
             z-index: 3;
             padding: 12px;
             border-radius: 8px;
-            pointer-events: none;
+            pointer-events: none; /* Crucial: This must stay 'none' for the AR cards so they don't block taps */
             width: 190px;
             text-align: left;
             margin-bottom: 5px;
@@ -47,6 +47,54 @@
         p { margin: 0; font-weight: bold; color: white;}
         .label { font-size: 10px; color: #aaa; font-weight: normal; display: block; margin-bottom: 2px;}
 
+        /* --- NEW: AI PANEL STYLES --- */
+        /* This panel sits at the bottom of the screen and is interactive */
+        #ai-interaction-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            z-index: 10; /* Must be high to sit above the video */
+            background: rgba(10, 10, 10, 0.85);
+            border-radius: 12px;
+            padding: 15px;
+            box-sizing: border-box;
+            border: 1px solid #333;
+            text-align: center;
+        }
+
+        #aiUpcycleBtn {
+            padding: 12px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #aiUpcycleBtn:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+
+        #aiResponseBox {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px dashed #2196F3;
+            border-radius: 8px;
+            background-color: rgba(33, 150, 243, 0.1);
+            color: #bbdefb;
+            font-size: 12px;
+            text-align: left;
+            line-height: 1.4;
+        }
+
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
@@ -65,6 +113,15 @@
     <div id="recycle-tag" class="ar-card">
         <h3>RECYCLE GUIDE</h3>
         <p id="recycle-val" style="color: #ABF;">...</p>
+    </div>
+
+    <div id="ai-interaction-panel">
+        <button id="aiUpcycleBtn" onclick="generateUpcycleTip()">
+            ✨ Generate AI Upcycling Tip & Log Scan
+        </button>
+        <div id="aiResponseBox">
+            <strong>🤖 AI Suggestion:</strong> <span id="aiTipText">Thinking...</span>
+        </div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -197,6 +254,10 @@
             return db[className] || null; // Return null if not in our list
         }
 
+        // Global variable to store the currently viewed item so the button knows what to send
+        let currentDetectedItem = "Unknown Object";
+        let currentDetectedImpact = "Unknown Impact";
+
         function detectFrame() {
             model.detect(video).then(predictions => {
                 
@@ -213,6 +274,10 @@
                 if (target && goodModel && badModel) {
                     const data = getData(target.class);
                     let objectToShow = null;
+
+                    // Store the current data globally so the button can access it
+                    currentDetectedItem = target.class.toUpperCase();
+                    currentDetectedImpact = data.co2;
 
                     // LOGIC: Red/Orange = Trash Model | Green/Yellow = Tree Model
                     if (data.color === '#FF0000' || data.color === '#FF4500') {
@@ -247,9 +312,9 @@
                     
                     carbonTag.style.borderColor = data.color;
                     carbonTag.style.boxShadow = `0 0 10px ${data.color}`;
-                    objName.innerText = target.class.toUpperCase();
+                    objName.innerText = currentDetectedItem;
                     objName.style.color = data.color;
-                    co2Val.innerText = data.co2;
+                    co2Val.innerText = currentDetectedImpact;
 
                     // RECYCLE CARD (Stacked below)
                     recycleTag.style.display = 'block';
@@ -273,6 +338,50 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        // --- NEW: INTEGRATION WITH N8N ---
+        async function generateUpcycleTip() {
+            // Replace this specific string with the URL you copied from your n8n test node!
+            const webhookUrl = "https://shivamthopate.app.n8n.cloud/webhook-test/2733c82c-3922-4c3d-849b-3c6267d0654b"; 
+            
+            const btn = document.getElementById("aiUpcycleBtn");
+            const responseBox = document.getElementById("aiResponseBox");
+            const tipText = document.getElementById("aiTipText");
+
+            // Prevent hitting the button multiple times while waiting
+            btn.innerText = "Analyzing & Logging...";
+            btn.disabled = true;
+            responseBox.style.display = "block";
+            tipText.innerText = "Consulting AI model...";
+
+            const payload = {
+                objectName: currentDetectedItem,
+                emissionImpact: currentDetectedImpact
+            };
+
+            try {
+                const response = await fetch(webhookUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                // Display the AI tip received from n8n. 
+                // We will ensure our n8n 'Respond to Webhook' node outputs an 'aiTip' key.
+                tipText.innerText = result.aiTip || "Tip generated successfully! (Check n8n to configure response mapping).";
+                
+                btn.innerText = "✨ Generate Another Tip";
+                btn.disabled = false;
+
+            } catch (error) {
+                console.error("Pipeline Error:", error);
+                tipText.innerText = "Check n8n configuration! Data was sent, but failed to receive response.";
+                btn.innerText = "Try Again";
+                btn.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>
